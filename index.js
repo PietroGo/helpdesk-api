@@ -66,7 +66,7 @@ app.post('/auth/login', async (req, res) => {
     }
 });
 
-function authenticateToken(req, res, next) {
+function authenticateToken(req, res, next) { // Middleware para autenticar o token JWT
     const authHeader = req.headers.authorization; //verifica se o cabeçalho de autorização está presente na requisição
 
     if (!authHeader) {
@@ -85,7 +85,12 @@ function authenticateToken(req, res, next) {
 
     
 }
-
+function requireAdmin(req, res, next){ // Middleware para verificar se o usuário é um administrador
+    if (req.user.role !== 'ADMIN') {
+        return res.status(403).json({ error: 'Acesso permitido apenas para adiministradores' });
+    }
+    next();
+}
 app.get('/tickets', authenticateToken, async (req, res) => {
         // req.user já está disponível aqui, pois o middleware authenticateToken foi chamado antes desta rota
     const tickets = await prisma.ticket.findMany({
@@ -115,6 +120,23 @@ app.post('/tickets', authenticateToken, async (req, res) => {
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: 'Erro ao criar ticket' });
+    }
+});
+
+app.patch('/tickets/:id/status', authenticateToken, requireAdmin, async (req, res) => { // Rota para atualizar o status do ticket
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        const ticket = await prisma.ticket.update({
+            where: { id },
+            data: { status }
+        });
+
+        res.json(ticket);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Erro ao atualizar o status do ticket' });
     }
 });
 
