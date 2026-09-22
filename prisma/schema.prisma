@@ -56,7 +56,7 @@ model Ticket {
 
 model Comment {
   id        String   @id @default(uuid())
-  content   String
+  message   String
   createdAt DateTime @default(now())
 
   ticketId String

@@ -140,6 +140,26 @@ app.patch('/tickets/:id/status', authenticateToken, requireAdmin, async (req, re
     }
 });
 
+app.post('/tickets/:id/comments', authenticateToken, async (req, res) => { // Rota para adicionar comentários a um ticket
+    try {
+        const { id } = req.params;
+        const { message } = req.body;
+
+        const comment = await prisma.comment.create({
+            data: {
+                message,
+                ticketId: id,
+                userId: req.user.userId
+            }
+        });
+
+        res.status(201).json(comment);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Erro ao adicionar comentário' });
+    }
+});
+
 app.listen(3000, () => {
     console.log("Server is running on port 3000");
 });
