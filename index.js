@@ -1,5 +1,5 @@
 require('dotenv').config();
-
+// Importa as dependências necessárias
 const jwt = require('jsonwebtoken');
 const express = require("express");
 const { PrismaClient } = require('@prisma/client');
@@ -140,7 +140,7 @@ app.patch('/tickets/:id/status', authenticateToken, requireAdmin, async (req, re
     }
 });
 
-app.post('/tickets/:id/comments', authenticateToken, async (req, res) => { // Rota para adicionar comentários a um ticket
+app.post('/tickets/:id/comments', authenticateToken, async (req, res) => { // Rota para adicionar comentários a um ticket criado
     try {
         const { id } = req.params;
         const { message } = req.body;
@@ -160,6 +160,30 @@ app.post('/tickets/:id/comments', authenticateToken, async (req, res) => { // Ro
     }
 });
 
+app.get ('/tickets/:id/', authenticateToken, async (req, res) => {  // Rota para buscar um ticket específico pelo ID, incluindo comentários e informações do usuário que criou o ticket
+    try {
+        const { id } = req.params;
+        const ticket = await prisma.ticket.findUnique({
+            where: { id },
+            include: {
+                comments: true,
+                createdBy: {
+                    select: { name: true,  email: true }
+                }
+             }
+        });
+        if (!ticket) {
+            return res.status(404).json({ error: 'Ticket não encontrado' });
+        }
+        if (ticket.companyId !== req.user.companyId) {
+            return res.status(403).json({ error: 'Acesso negado a este ticket' });
+        }
+        res.json(ticket);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Erro ao buscar ticket' });
+    }
+});
 app.listen(3000, () => {
     console.log("Server is running on port 3000");
 });
