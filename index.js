@@ -5,6 +5,7 @@ const express = require("express");
 const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const bcrypt = require('bcrypt');
+const crypto = require('crypto');
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
@@ -91,6 +92,68 @@ function requireAdmin(req, res, next){ // Middleware para verificar se o usuári
     }
     next();
 }
+
+app.post('/auth/forgot-password', async (req, res) => {
+    try {
+        const { email } = req.body;
+        const user = await prisma.user.findUnique({ where: { email } });
+
+        if (!user) {
+            return res.status(404).json({ error: 'Usuário não encontrado' });
+        }
+
+        const resetToken = crypto.randomBytes(32).toString('hex');
+        const resetTokenExpiry = new Date();
+        resetTokenExpiry.setHours(resetTokenExpiry.getHours() + 1); // Token expira em 1 hora
+
+        await prisma.user.update({
+            where: { email },
+            data: { resetToken, resetTokenExpiry }
+        });
+
+        // Em produção, você poderia enviar um e-mail com o link de redefinição de senha
+        console.log(`Link de redefinição de senha: http://localhost:3000/reset-password?token=${resetToken}`);
+
+        res.json({ message: 'E-mail de redefinição de senha enviado' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Erro ao enviar e-mail de redefinição de senha' });
+    }
+});
+
+app.post('/auth/reset-password', async (req, res) => {
+    try {
+        const { token, newPassword } = req.body;
+
+        const user = await prisma.user.findFirst({ 
+            where: { 
+                resetToken: token,
+                resetTokenExpiry: { gt: new Date() } // Verifica se o token ainda é válido
+             } });
+
+        if (!user) {
+            return res.status(404).json({ error: 'Token inválido ou expirado' });
+        }
+
+        if (user.resetTokenExpiry < new Date()) {
+            return res.status(400).json({ error: 'Token expirado' });
+        }
+
+        const passwordHash = await bcrypt.hash(newPassword, 10);
+
+        await prisma.user.update({
+            where: { id: user.id },
+            data: { passwordHash,
+                 resetToken: null, resetTokenExpiry: null }
+        });
+
+        res.json({ message: 'Senha redefinida com sucesso' });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: 'Erro ao redefinir senha' });
+    }
+});
+
 app.get('/tickets', authenticateToken, async (req, res) => {
         // req.user já está disponível aqui, pois o middleware authenticateToken foi chamado antes desta rota
     const tickets = await prisma.ticket.findMany({

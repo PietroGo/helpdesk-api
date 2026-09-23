@@ -29,6 +29,9 @@ model User {
   role         Role     @default(USER)
   createdAt    DateTime @default(now())
 
+resetToken      String?
+resetTokenExpiry DateTime?
+
   companyId String
   company   Company @relation(fields: [companyId], references: [id])
 
