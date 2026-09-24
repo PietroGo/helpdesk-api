@@ -6,11 +6,13 @@ const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
+const cors = require('cors');
 
 const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter });
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 app.get('/ping', (req, res) => {
