@@ -204,6 +204,57 @@ app.patch('/tickets/:id/status', authenticateToken, requireAdmin, async (req, re
         res.status(500).json({ error: 'Erro ao atualizar o status do ticket' });
     }
 });
+// Rota para criar um novo usuário dentro da mesma empresa
+app.post('/users', authenticateToken, requireAdmin, async (req, res) => { // Rota para criar um novo usuário dentro da mesma empresa
+    try {
+
+        // Pega o corpo da requisição só que o cliente pode escolher
+        const { name, email, password, role } = req.body;
+
+        // Valida se os campos obrigatórios foram fornecidos
+        if (!name || !email || !password) {
+            return res.status(400).json({ error: 'Nome, e-mail e senha são obrigatórios' });
+        }
+
+        // Se o admin não informa role, o novo usuário vira USER
+        // Só aceitamos os dois valores que existem no enum do Prisma, que são USER e ADMIN
+        const newRole = role || 'USER'; // Se não for fornecido, o padrão será 'USER'
+        if (newRole !== 'USER' && newRole !== 'ADMIN') {
+            return res.status(400).json({ error: 'Função inválida. Deve ser USER ou ADMIN' });
+        }
+    
+
+    // Procura se já existe alguém com esse email
+    const existingUser = await prisma.user.findUnique({ where: { email } });
+    if (existingUser) {
+        return res.status(400).json({ error: 'E-mail já está em uso' });
+    }
+
+    const passwordHash = await bcrypt.hash(password, 10);
+
+    const user = await prisma.user.create({
+        data: {
+            name,
+            email,
+            passwordHash,
+            role: newRole,
+            // A empresa vem do token do admin que está logado
+            companyId: req.user.companyId // Assumindo que o payload do token contém companyId
+        },
+
+        // Seleciona apenas os campos que queremos retornar
+        select: { id: true, name: true, email: true, role: true , companyId: true } 
+    });
+
+
+    // 201 = created
+    res.status(201).json(user);
+}   catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Erro ao criar usuário' });
+}
+});
+
 
 app.post('/tickets/:id/comments', authenticateToken, async (req, res) => { // Rota para adicionar comentários a um ticket criado
     try {
