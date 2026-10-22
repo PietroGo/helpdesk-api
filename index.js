@@ -113,8 +113,8 @@ app.post('/auth/forgot-password', async (req, res) => {
             data: { resetToken, resetTokenExpiry }
         });
 
-        // Em produção, você poderia enviar um e-mail com o link de redefinição de senha
-        console.log(`Link de redefinição de senha: http://localhost:3000/reset-password?token=${resetToken}`);
+        // O link precisa abrir a tela do React (porta 5173), não a API
+        console.log(`Link de redefinição de senha: http://localhost:5173/reset-password?token=${resetToken}`);
 
         res.json({ message: 'E-mail de redefinição de senha enviado' });
     } catch (error) {
