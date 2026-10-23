@@ -15,6 +15,22 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+//confere se o texto tem cara de email: algo@algo.algo, sem espaços
+function isValidEmail(email){
+    //typeof evita erro caso o cliente mande um número ou objeto em vez de texto
+    return typeof email === 'string' && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+}
+
+//Tira tudo que não é número: "11.222.333/0001-81" vira "111222333000181"
+function normalizeCnpj(cnpj){
+    // \D significa "qualquer caractere que não seja dígito"
+    return String(cnpj || '').replace(/\D/g, '');
+}
+// Regra mínima de senha: 8 caracteres ou mais
+function isValidPassword(password){
+    return typeof password === 'string' && password.length >=8;
+}
 app.get('/ping', (req, res) => {
     res.send('pong');
 });
@@ -22,20 +38,46 @@ app.get('/ping', (req, res) => {
 app.post('/auth/register', async (req, res) => {
     try {
         const { name, email, password, companyName, cnpj } = req.body;
-        const company = await prisma.company.create({
-            data: { name: companyName, cnpj }
-        });
+
+        //  Validação: barra dados ruins antes de encostar no banco
+        if (!name || !companyName) {
+            return res.status(400).json({ error: 'Nome e nome da empresa são obrigatórios' });
+        }
+        if (!isValidEmail(email)) {
+            return res.status(400).json({ error: 'Email inválido' });
+        }
+        if (!isValidPassword(password)) {
+            return res.status(400).json({ error: 'A senha deve ter pelo menos 8 caracteres' });
+        }
+        const cleanCnpj = normalizeCnpj(cnpj);
+        if (cleanCnpj.length !== 14) {
+            return res.status(400).json({ error: 'CNPJ deve ter 14 dígitos' });
+        }
+
+        //  Duplicidade: checa os dois campos únicos ANTES de criar qualquer coisa
+        const existingUser = await prisma.user.findUnique({ where: { email } });
+        if (existingUser) {
+            return res.status(409).json({ error: 'Já existe um usuário com esse email' });
+        }
+        const existingCompany = await prisma.company.findUnique({ where: { cnpj: cleanCnpj } });
+        if (existingCompany) {
+            return res.status(409).json({ error: 'Já existe uma empresa com esse CNPJ' });
+        }
 
         const passwordHash = await bcrypt.hash(password, 10);
-        const user = await prisma.user.create({
-            data: {
-                name,
-                email,
-                passwordHash,
-                role: 'ADMIN',
-                companyId: company.id
-            }
+
+        // Transação: empresa e usuário são criados juntos ou nenhum dos dois.
+        // Se a criação do usuário falhar, o Prisma desfaz a da empresa
+        const user = await prisma.$transaction(async (tx) => {
+            const company = await tx.company.create({
+                data: { name: companyName, cnpj: cleanCnpj }
+            });
+            // Dentro da transação usamos "tx" no lugar de "prisma"
+            return tx.user.create({
+                data: { name, email, passwordHash, role: 'ADMIN', companyId: company.id }
+            });
         });
+
         res.status(201).json({ message: 'Usuário e empresa criados', userId: user.id });
     } catch (error) {
         console.error(error);
@@ -46,22 +88,33 @@ app.post('/auth/register', async (req, res) => {
 app.post('/auth/login', async (req, res) => {
     try {
         const { email, password } = req.body;
-        const user = await prisma.user.findUnique({
-            where: { email }
-        });
-        console.log('Usuário encontrado:', user);
+
+        // Sem esses campos o Prisma daria erro ao procurar com valor undefined
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Informe email e senha' });
+        }
+
+        const user = await prisma.user.findUnique({ where: { email } });
+
+        // A mesma mensagem nos dois casos (email inexistente ou senha errada)
+        // para não revelar quais emails estão cadastrados
         if (!user) {
             return res.status(401).json({ error: 'Credenciais inválidas' });
         }
 
+        // bcrypt.compare confere a senha digitada contra o hash salvo
         const isMatch = await bcrypt.compare(password, user.passwordHash);
-
-        console.log('Senha corresponde:', isMatch);
         if (!isMatch) {
             return res.status(401).json({ error: 'Credenciais inválidas' });
         }
 
-        const token = jwt.sign({ userId: user.id, role: user.role, companyId: user.companyId }, process.env.JWT_SECRET, { expiresIn: '1h' });
+        // O payload carrega o que as outras rotas precisam: quem é, o papel e a empresa
+        const token = jwt.sign(
+            { userId: user.id, role: user.role, companyId: user.companyId },
+            process.env.JWT_SECRET,
+            { expiresIn: '1h' }
+        );
+
         res.json({ token });
     } catch (error) {
         console.error(error);
@@ -98,34 +151,45 @@ function requireAdmin(req, res, next){ // Middleware para verificar se o usuári
 app.post('/auth/forgot-password', async (req, res) => {
     try {
         const { email } = req.body;
-        const user = await prisma.user.findUnique({ where: { email } });
 
+        // Sem email não há o que procurar (e o Prisma daria erro com valor undefined)
+        if (!email) {
+            return res.status(400).json({ error: 'Informe o email' });
+        }
+
+        // A mesma resposta é devolvida nos dois casos, para ninguém descobrir quais emails existem
+        const genericResponse = { message: 'Se o email existir, enviamos um link de recuperação' };
+
+        const user = await prisma.user.findUnique({ where: { email } });
         if (!user) {
-            return res.status(404).json({ error: 'Usuário não encontrado' });
+            return res.json(genericResponse); // antes era 404: isso entregava que o email não existe
         }
 
         const resetToken = crypto.randomBytes(32).toString('hex');
-        const resetTokenExpiry = new Date();
-        resetTokenExpiry.setHours(resetTokenExpiry.getHours() + 1); // Token expira em 1 hora
+        const resetTokenExpiry = new Date(Date.now() + 15 * 60 * 1000); // 15 minutos
 
         await prisma.user.update({
             where: { email },
             data: { resetToken, resetTokenExpiry }
         });
 
-        // O link precisa abrir a tela do React (porta 5173), não a API
+        // Em produção, aqui iria o envio de email. Por enquanto, simulamos no terminal
         console.log(`Link de redefinição de senha: http://localhost:5173/reset-password?token=${resetToken}`);
 
-        res.json({ message: 'E-mail de redefinição de senha enviado' });
+        res.json(genericResponse);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: 'Erro ao enviar e-mail de redefinição de senha' });
+        res.status(500).json({ error: 'Erro ao processar solicitação' });
     }
 });
 
 app.post('/auth/reset-password', async (req, res) => {
     try {
         const { token, newPassword } = req.body;
+
+        if (!isValidPassword(newPassword)) {
+            return res.status(400).json({ error: 'A senha deve ter pelo menos 8 caracteres' });
+        }
 
         const user = await prisma.user.findFirst({ 
             where: { 
@@ -216,6 +280,13 @@ app.post('/users', authenticateToken, requireAdmin, async (req, res) => { // Rot
             return res.status(400).json({ error: 'Nome, e-mail e senha são obrigatórios' });
         }
 
+         if (!isValidEmail(email)) {
+            return res.status(400).json({ error: 'Email inválido' });
+        }
+        if (!isValidPassword(password)) {
+            return res.status(400).json({ error: 'A senha deve ter pelo menos 8 caracteres' });
+        }
+
         // Se o admin não informa role, o novo usuário vira USER
         // Só aceitamos os dois valores que existem no enum do Prisma, que são USER e ADMIN
         const newRole = role || 'USER'; // Se não for fornecido, o padrão será 'USER'
@@ -227,7 +298,7 @@ app.post('/users', authenticateToken, requireAdmin, async (req, res) => { // Rot
     // Procura se já existe alguém com esse email
     const existingUser = await prisma.user.findUnique({ where: { email } });
     if (existingUser) {
-        return res.status(400).json({ error: 'E-mail já está em uso' });
+        return res.status(409).json({ error: 'E-mail já está em uso' });
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
