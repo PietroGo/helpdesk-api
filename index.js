@@ -31,6 +31,18 @@ function normalizeCnpj(cnpj){
 function isValidPassword(password){
     return typeof password === 'string' && password.length >=8;
 }
+
+// Busca o ticket e confere se ele pertence à empresa do usuário logado.
+// Devolve o ticket, ou null se ele não existir OU for de outra empresa
+async function findTicketOfCompany(id, companyId) {
+    const ticket = await prisma.ticket.findUnique({where: {id}});
+    // Um único "null" para os dois casos: assim quem tenta adivinhar IDs
+    // não consegue descobrir quais tickets existem em outras empresas
+    if (!ticket || ticket.companyId !== companyId) return null;
+    return ticket;
+    
+}
+
 app.get('/ping', (req, res) => {
     res.send('pong');
 });
@@ -256,6 +268,18 @@ app.patch('/tickets/:id/status', authenticateToken, requireAdmin, async (req, re
     try {
         const { id } = req.params;
         const { status } = req.body;
+        
+        // Só aceita os valores que existem no enum TicketStatus do schema
+        const validStatuses = ['ABERTO', 'EM_ANDAMENTO', 'RESOLVIDO', 'FECHADO'];
+        if (!validStatuses.includes(status)) {
+            return res.status(400).json({ error: 'Status inválido'});
+        }
+         
+        // Confere se o ticket é da empresa do admin logado
+        const existing = await findTicketOfCompany(id, req.user.companyId);
+        if (!existing){
+            return res.status(404).json({ error: 'Ticket não encontrado'});
+        }
 
         const ticket = await prisma.ticket.update({
             where: { id },
@@ -331,7 +355,19 @@ app.post('/tickets/:id/comments', authenticateToken, async (req, res) => { // Ro
     try {
         const { id } = req.params;
         const { message } = req.body;
+        
+        // Sem texto não há comentário
+        if (!message  || !message.trim()){
+            return res.status(400).json({error: 'O comentário não pode ser vazio' });
 
+        }
+
+        // Só dá para comentar em tickets da própria empresa
+        const existing = await findTicketOfCompany(id, req.user.companyId);
+        if (!existing){
+            return res.status(404).json({ error: 'Ticket não encontrado' })
+        }
+        
         const comment = await prisma.comment.create({
             data: {
                 message,
