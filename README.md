@@ -1,8 +1,24 @@
 # HELPDESK API
 
-Projeto de portfólio que simula um sistema de suporte técnico usado por empresas, com autenticação, perfis de acesso e acompanhamento de tickets. A interface em React está em.[https://github.com/PietroGo/helpdesk-frontend].
+Projeto de portfólio que simula um sistema de suporte técnico usado por empresas, com autenticação, perfis de acesso e acompanhamento de tickets. A interface em React está em [helpdesk-frontend](https://github.com/PietroGo/helpdesk-frontend).
 
-## Funcionalidades :
+## Tecnologias
+
+|          Tecnologia      |                     Uso no projeto                        |
+|--------------------------|-----------------------------------------------------------|
+| Node.js                  | Ambiente de execução do servidor                          |
+| Express                  | Rotas HTTP e middlewares de autenticação e autorização    |
+| PostgreSQL               | Banco de dados relacional                                 |
+| Prisma ORM               | Modelagem do banco, migrations e consultas                |
+| pg + @prisma/adapter-pg  | Driver de conexão com o PostgreSQL, exigido pelo Prisma 7 |
+| jsonwebtoken (JWT)       | Geração e verificação dos tokens de acesso                |
+| bcrypt                   | Hash das senhas                                           |
+| dotenv                   | Variáveis de ambiente (arquivo `.env`)                    |
+| cors                     | Libera as requisições vindas do frontend                  |
+
+# Ferramentas de desenvolvimento: Postman (testes das rotas), DBeaver (consulta ao banco), Git e GitHub.
+
+## Funcionalidades
 
 - Cadastro de empresa junto com o primeiro administrador
 - Login com JWT e recuperação de senha por token temporário
@@ -25,7 +41,7 @@ Projeto de portfólio que simula um sistema de suporte técnico usado por empres
 | PATCH  | /tickets/:id/status   | Admin    | Altera o status do ticket            |
 | POST   | /tickets/:id/comments | Logado   | Adiciona um comentário               |
 
-As rotas protegidas exigem o header `Authorization: Bearer <token>`.
+# As rotas protegidas exigem o header `Authorization: Bearer <token>`.
 
 ## Como rodar
 
@@ -37,21 +53,30 @@ As rotas protegidas exigem o header `Authorization: Bearer <token>`.
 
 ## Decisões técnicas
 
-A empresa do usuário vem do token, não do corpo da requisição
+# A empresa do usuário vem do token, não do corpo da requisição
 - Por quê: se o cliente pudesse mandar o companyId, qualquer usuário poderia dizer que é de outra empresa e criar ou ler dados dela. O servidor só confia no que ele mesmo assinou.
 - Custo: o token carrega essa informação, então ela só muda se o usuário fizer login de novo.
 - Onde aparece: criação de ticket, listagem e cadastro de usuários.
 
-JWT em vez de sessão guardada no servidor
+# JWT em vez de sessão guardada no servidor
 - Por quê: o servidor não precisa consultar o banco a cada requisição pra saber quem é a pessoa. O token já traz usuário, perfil e empresa, e a assinatura impede falsificação.
 - Custo: não dá pra invalidar um token antes de ele expirar. O logout só apaga o token no navegador, e por isso ele dura 1 hora.
 - Melhoria possível: tokens de curta duração com renovação, ou uma lista de tokens revogados.
 
-Cadastro com validação, checagem de duplicidade e transação
+# Cadastro com validação, checagem de duplicidade e transação
 - Por quê: a versão antiga criava a empresa primeiro e o usuário depois. Com email repetido, sobrava uma empresa sem dono no banco. Agora o sistema valida e checa duplicidade antes de gravar, e usa transação, então empresa e usuário são criados juntos ou nenhum dos dois.
 - Custo: a checagem prévia e a transação adicionam consultas ao banco.
 
-PostgreSQL com Prisma
-- Por quê PostgreSQL: os dados são relacionais (empresa tem usuários, usuário abre tickets, ticket tem comentários), e o banco garante as ligações por chave estrangeira. Os valores de status e - prioridade são enums, então o banco recusa um status inventado.
-- Por quê Prisma: o schema vira a documentação do modelo, as migrations ficam versionadas e as consultas são verificadas antes de rodar.
+# PostgreSQL com Prisma
+- Por quê PostgreSQL: os dados são relacionais (empresa tem usuários, usuário abre tickets, ticket tem comentários), e o banco garante as ligações por chave estrangeira. Os valores de status e prioridade são enums, então o banco recusa um status inventado.
+- Por quê Prisma: o schema vira a documentação do modelo, as migrations ficam versionadas e o Prisma valida as consultas contra o schema e recusa campos que não existem.
 - Custo: o Prisma esconde o SQL, então vale saber o que ele gera por baixo. Na versão 7 também exigiu configurar o driver adapter.
+
+## Limitações e Próximos passos
+
+- Não envia email de verdade: o link de recuperação aparece no terminal do servidor.
+- Não há testes automatizados.
+- Não existe tela pro administrador cadastrar usuários (a rota existe).
+- Não dá pra editar ou apagar tickets e comentários, e a listagem não tem paginação.
+- O status pode ir de qualquer valor pra qualquer outro, sem regra de ordem.
+- Não há limite de tentativas de login, e o CORS está aberto pra qualquer origem.
